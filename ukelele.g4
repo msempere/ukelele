@@ -40,15 +40,15 @@ ts_son = SymbolsTable($ts)
     from_block=block[ts_son]
 {
 $code += ".maxstack " + str($from_block.stack_out) + "\n"
-for l in $from_block.locals:
+for t,n in $from_block.locals:
     i = 0
     $code += '.locals init ('
-    if l == 'int':
-        $code += 'int32 V_' + str(i)
-    elif l == 'bool':
-        $code += 'bool V_' + str(i)
-    elif l == 'float':
-        $code += 'float32 V_' + str(i)
+    if t == 'int':
+        $code += 'int32 ' + n + '_' + str(i)
+    elif t == 'bool':
+        $code += 'bool ' + n + '_' + str(i)
+    elif t == 'float':
+        $code += 'float32 ' + n + '_' + str(i)
     $code += ')\n'
 
 $code += $from_block.body 
@@ -91,7 +91,7 @@ $locals += $from_instr.locals
 $stack_out += $from_instr.stack_out 
 $body += $from_instr.body
 }
-    | from_decl=decl[ts]
+    | from_decl=decl[ts, '']
 {
 $locals += $from_decl.locals
 $stack_out += $from_decl.stack_out 
@@ -101,7 +101,7 @@ $body += $from_decl.body
     ;
 
 
-decl[SymbolsTable ts] returns [Int stack_out, String body, List locals]
+decl[SymbolsTable ts, String scope] returns [Int stack_out, String body, List locals]
 @init
 {
 assignation = False
@@ -114,19 +114,24 @@ $locals = []
 
 if not $ts.get($IDENTIFIER.text):
     if $type_simple.text != 'auto':
-        $locals.append($type_simple.text)
+        $locals.append(($type_simple.text, $IDENTIFIER.text))
 
-    $ts.add(name=$IDENTIFIER.text, stype=$type_simple.text, isFunction=False, scope=Scope.BLOCK_LOCAL)
+    $ts.add(name=$IDENTIFIER.text, stype=$type_simple.text, isFunction=False, scope=Scope.BLOCK_LOCAL if not $scope else $scope)
     
     if assignation:
         if $type_simple.text == 'auto':
             identifier = $ts.get($IDENTIFIER.text)
             identifier.stype = $from_expr.type_out
-            $locals.append($from_expr.type_out)
+            $locals.append(($from_expr.type_out, $IDENTIFIER.text))
 
         $stack_out += $from_expr.stack_out 
         $body += $from_expr.expr_out + 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
         assignation = False
+else:
+    if $scope == Scope.FOR_LOOP:
+        print($IDENTIFIER.text + ' shadows a var')
+    else:
+        print($IDENTIFIER.text + ' already defined')
 }
     ( COMMA IDENTIFIER (ASSIGN{assignation=True}expr[ts])? )* SEMICOLON
     ;
@@ -148,7 +153,7 @@ $body += $operation.operation
     | from_block=block[$ts]
 {
 $stack_out = $from_block.stack_out
-$body = $from_block.body
+$body += $from_block.body
 }
     | IF condition=expr[$ts] from_instr=instr[$ts]
 {
@@ -173,6 +178,50 @@ if not initialize:
     $stack_out += $from_expr.stack_out 
     $body += $from_expr.expr_out + 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
 } 
+    | FOR from_forexpr=forexpr[$ts]
+{
+$stack_out += $from_forexpr.stack_out 
+$body += $from_forexpr.body
+$locals = $from_forexpr.locals
+}
+    | IDENTIFIER POSTADDOP SEMICOLON
+{
+$body +=  'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+
+if $ts.get($IDENTIFIER.text).stype  == 'int':
+    $body += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
+elif $ts.get($IDENTIFIER.text).stype  == 'float':
+    $body += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
+
+$body += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
+$stack_out += 2
+}   
+    ;
+
+forexpr[SymbolsTable ts] returns [Int stack_out, String body, List locals]
+@init{
+ts_son = SymbolsTable($ts)
+$stack_out = 0
+$body = ""
+$locals = []
+}
+    : initial_decl=decl[ts_son, Scope.FOR_LOOP]
+{
+$stack_out += $initial_decl.stack_out 
+$body += $initial_decl.body
+$locals = $initial_decl.locals
+}
+    comparison=expr[ts_son] SEMICOLON IDENTIFIER (COLON)? ASSIGN post_comparison=expr[ts_son] SEMICOLON body_for=block[ts_son]
+{
+self.branches += 1
+init_branch = self.branches
+$body += 'L' + str(init_branch) + ':\n'
+$stack_out += $comparison.stack_out 
+self.branches += 1
+$body += $comparison.expr_out + 'ldc.i4 1\nbne.un L' + str(self.branches) + '\n' + $body_for.body 
+$body += $post_comparison.expr_out + 'stloc.' + str(ts_son.get($IDENTIFIER.text).index) + '\n'
+$body += 'br L' + str(init_branch) + '\nL' + str(self.branches) + ':\n'
+}
     ;
 
 assignment_operator
@@ -211,31 +260,6 @@ $stack_out = $from_expr.stack_out
 }
     ;
 
-/*expression[SymbolsTable ts] returns [int stack_out, String expr_out, String returned_type] [> support for {expression1; expression2; etc...}<]*/
-/*@init{*/
-/*$expr_out = ''*/
-/*$stack_out = 0*/
-/*}*/
-    /*: LBRACKET RBRACKET*/
-    /*| INTEGER */
-/*{*/
-/*$stack_out += 1*/
-/*$expr_out += 'ldc.i4 ' + $INTEGER.text + '\n'*/
-/*$returned_type = 'int'*/
-/*} */
-    /*| STRING*/
-/*{*/
-/*$stack_out += 1*/
-/*$expr_out += 'ldstr ' + $STRING.text + '\n'*/
-/*$returned_type = 'string'*/
-/*}*/
-    /*| IDENTIFIER*/
-/*{*/
-/*$stack_out += 1*/
-/*$expr_out += 'ldloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'*/
-/*$returned_type = $ts.get($IDENTIFIER.text).stype*/
-/*}*/
-    /*; */
 
 parameters returns [String params]
 @init{
@@ -445,7 +469,7 @@ $type_out = 'float'
     | BOOLEANO
 {
 $stack_out = 1
-$expr_out = 'ldc.i4 ' + '1' if $BOOLEANO.text == 'True' else '0' + '\n'
+$expr_out = 'ldc.i4 1\n' if $BOOLEANO.text == 'True' else 'ldc.i4 0\n'
 $type_out = 'bool'
 }
     | LPAREN from_expr=expr[ts]
@@ -475,6 +499,7 @@ fragment ESCAPED_QUOTE : '\\"';
 VOID : 'void';
 INT : 'int';
 DEF : 'def';
+FOR : 'for';
 IF : 'if';
 ELSE : 'else';
 RETURN : 'return';
@@ -485,6 +510,7 @@ AUTO : 'auto';
 OR : 'or';
 NOT : 'not';
 AND : 'and';
+POSTADDOP: '++' | '--';
 RELOP : '=='|'!='|'<' | '>' | '<=' | '>=';
 ADDOP : '+' | '-';
 MULOP : '*' | '/';
