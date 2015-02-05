@@ -3,7 +3,7 @@ def main() void{
     auto a = 1;
 
     if(a != 2) 
-        for int i=10; i>0; i=i-2;
+        for(int i=10; i>0; i=i-2)
         {
             println(i);
         }

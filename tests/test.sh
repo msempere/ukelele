@@ -6,8 +6,9 @@ mono=mono
 
 for j in *.uk
     do
-        $compiler $j
         n=$(basename $j .uk)
+        rm -rf $n.ukil $n.exe
+        $compiler $j
         $ilasm $n.ukil 1>/dev/null
         $mono $n.exe > $n.tmp
         diff -b -B --brief $n.out $n.tmp

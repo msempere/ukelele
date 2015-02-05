@@ -1,7 +1,7 @@
 def main() void{
     int i = 0;
-    i++;
-    println(i);
-    i--;
-    println(i);
+    int j = ++i;
+    println(j);
+    j = i++;
+    println(j);
 }
