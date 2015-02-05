@@ -13,6 +13,7 @@ options {
     self.branches = 0
 }
 
+
 /* ----- GRAMMAR RULES ----- */
 s[SymbolsTable ts] returns [String code]
 @init{
@@ -140,6 +141,7 @@ else:
 instr[SymbolsTable ts] returns [Int stack_out, String body, List locals]
 @init
 {
+ts_son = None
 $stack_out = 0
 $body = ""
 $locals = []
@@ -184,18 +186,24 @@ $stack_out += $from_forexpr.stack_out
 $body += $from_forexpr.body
 $locals = $from_forexpr.locals
 }
-    | IDENTIFIER POSTADDOP SEMICOLON
+    | DO {ts_son = SymbolsTable($ts)} from_block=block[ts_son] WHILE LPAREN comparison=expr[$ts] RPAREN
 {
-$body +=  'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
-
-if $ts.get($IDENTIFIER.text).stype  == 'int':
-    $body += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
-elif $ts.get($IDENTIFIER.text).stype  == 'float':
-    $body += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
-
-$body += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
-$stack_out += 2
-}   
+self.branches += 1
+init_branch = self.branches
+$stack_out += $from_block.stack_out + 1 + $comparison.stack_out
+$body += 'L' + str(init_branch) + ':\n'
+$body += $from_block.body + $comparison.expr_out + 'ldc.i4 1\nbeq L' + str(init_branch) + '\n'
+}
+    | WHILE LPAREN comparison=expr[ts] RPAREN {ts_son = SymbolsTable($ts)} from_block=block[ts_son]
+{
+self.branches += 1
+init_branch = self.branches
+$stack_out += $comparison.stack_out + 1 + $from_block.stack_out
+$body += 'L' + str(init_branch) + ':\n'
+self.branches += 1
+$body += $comparison.expr_out + 'ldc.i4 1\nbne.un L' + str(self.branches) + '\n' + $from_block.body + 'br L' + str(init_branch) + '\n' 
+$body += 'L' + str(self.branches) + ':\n'
+}
     ;
 
 forexpr[SymbolsTable ts] returns [Int stack_out, String body, List locals]
@@ -205,18 +213,18 @@ $stack_out = 0
 $body = ""
 $locals = []
 }
-    : initial_decl=decl[ts_son, Scope.FOR_LOOP]
+    :  LPAREN initial_decl=decl[ts_son, Scope.FOR_LOOP]
 {
 $stack_out += $initial_decl.stack_out 
 $body += $initial_decl.body
 $locals = $initial_decl.locals
 }
-    comparison=expr[ts_son] SEMICOLON IDENTIFIER (COLON)? ASSIGN post_comparison=expr[ts_son] SEMICOLON body_for=block[ts_son]
+    comparison=expr[ts_son] SEMICOLON IDENTIFIER (COLON)? ASSIGN post_comparison=expr[ts_son] RPAREN body_for=block[ts_son]
 {
 self.branches += 1
 init_branch = self.branches
 $body += 'L' + str(init_branch) + ':\n'
-$stack_out += $comparison.stack_out 
+$stack_out += $comparison.stack_out + 1 + $body_for.stack_out 
 self.branches += 1
 $body += $comparison.expr_out + 'ldc.i4 1\nbne.un L' + str(self.branches) + '\n' + $body_for.body 
 $body += $post_comparison.expr_out + 'stloc.' + str(ts_son.get($IDENTIFIER.text).index) + '\n'
@@ -491,6 +499,34 @@ if $type_in == 'float':
         $expr_out += 'conv.r8\n'
         $type_out = 'float'
 }
+    | POSTADDOP IDENTIFIER
+{
+$expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+
+if $ts.get($IDENTIFIER.text).stype  == 'int':
+    $expr_out += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
+elif $ts.get($IDENTIFIER.text).stype  == 'float':
+    $expr_out += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
+
+$expr_out += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
+$expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+$stack_out += 3
+$type_out = 'int'
+}
+    | IDENTIFIER POSTADDOP
+{
+$expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+$expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+
+if $ts.get($IDENTIFIER.text).stype  == 'int':
+    $expr_out += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
+elif $ts.get($IDENTIFIER.text).stype  == 'float':
+    $expr_out += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
+
+$expr_out += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
+$stack_out += 3
+$type_out = 'int'
+}   
     ;
 
 fragment ESCAPED_QUOTE : '\\"';
@@ -500,6 +536,8 @@ VOID : 'void';
 INT : 'int';
 DEF : 'def';
 FOR : 'for';
+DO : 'do';
+WHILE : 'while';
 IF : 'if';
 ELSE : 'else';
 RETURN : 'return';
