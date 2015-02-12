@@ -1,0 +1,14 @@
+def main() void{
+    int a[5][6];
+    bool b[5];
+    float c[1][2][3][4];
+    a[1][2] = 3;
+    println(a[1][2]);
+    println(a[1][1]);
+    b[1] = True;
+    println(b[1]);
+    println(b[2]);
+    c[7] = 0.2;
+    println(c[0]);
+    println(c[7]);
+}
