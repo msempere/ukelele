@@ -40,26 +40,21 @@ ts_son = SymbolsTable($ts)
 
     from_block=block[ts_son]
 {
-$code += ".maxstack " + str($from_block.stack_out) + "\n"
+$code += ".maxstack " + str($from_block.stack_out) + "\n" + '.locals init ('
+local_vars = []
 for t,n in $from_block.locals:
     i = 0
-    $code += '.locals init ('
-
-    if '[]' in t:
-        if t == 'int[]':
-            $code += 'int32[] ' + n + '_' + str(i)
-        elif t == 'bool[]':
-            $code += 'bool[] ' + n + '_' + str(i)
-        elif t == 'float[]':
-            $code += 'float32[] ' + n + '_' + str(i)
+    if '[' and ']' in t:
+        array_type = t.split('[')[0]
+        local_vars.append(t.replace(array_type, self.types[array_type])  + ' ' +  n + '_' + str(i))
     else:
         if t == 'int':
-            $code += 'int32 ' + n + '_' + str(i)
+            local_vars.append('int32 ' + n + '_' + str(i))
         elif t == 'bool':
-            $code += 'bool ' + n + '_' + str(i)
+            local_vars.append('bool ' + n + '_' + str(i))
         elif t == 'float':
-            $code += 'float32 ' + n + '_' + str(i)
-    $code += ')\n'
+            local_vars.append('float32 ' + n + '_' + str(i))
+$code += ','.join(local_vars) + ')\n'
 
 $code += $from_block.body 
 if $type_specifier.text == 'void':
@@ -115,6 +110,8 @@ decl[SymbolsTable ts, String scope] returns [Int stack_out, String body, List lo
 @init
 {
 assignation = False
+dimensions = 0
+numelements = 0
 $body = ""
 $stack_out = 0
 $locals = []
@@ -147,16 +144,29 @@ else:
 
     | type_simple IDENTIFIER LCOR from_dims=dims RCOR
 {
-$body += 'ldc.i4 ' + $from_dims.body + '\nnewarr [mscorlib]System.'
-$ts.add(name=$IDENTIFIER.text, stype=$type_simple.text + '[]', isFunction=False, scope=Scope.BLOCK_LOCAL if not $scope else $scope)
-$locals.append(($type_simple.text + '[]', $IDENTIFIER.text))
+dimensions = 1
+elements = [$from_dims.body]
+}
+    (LCOR from_another_dims=dims RCOR
+{
+dimensions += 1
+elements.append($from_another_dims.body)
+}
+    )* SEMICOLON
+{
+dims = '[' 
+if dimensions > 1:
+    for i in range(dimensions):
+        dims += ','
+dims += ']'
+$locals.append(($type_simple.text + dims, $IDENTIFIER.text))
+$ts.add(name=$IDENTIFIER.text, stype=$type_simple.text + dims, isFunction=False, scope=Scope.BLOCK_LOCAL if not $scope else $scope)
 
-if $type_simple.text == 'int':
- $body += 'Int32\n'
-
+$body += 'ldc.i4 ' + str(reduce(lambda x, y: int(x)*int(y), elements)) + '\n'
+$stack_out += 1
+$body += 'newarr [mscorlib]System.Int32\n'
 $body += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
 }
-    (COMMA IDENTIFIER LCOR dims RCOR)* SEMICOLON
     ;
 
 
@@ -202,18 +212,28 @@ if not initialize:
     $stack_out += $from_expr.stack_out 
     $body += $from_expr.expr_out + 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
 } 
-    | IDENTIFIER LCOR pos=expr[$ts] RCOR ASSIGN new_value=expr[$ts] SEMICOLON
+    | IDENTIFIER LCOR pos=expr[$ts] RCOR
 {
 array = $ts.get($IDENTIFIER.text)
 if array:
-    $stack_out += $pos.stack_out + 1 + $new_value.stack_out
-    $body += 'ldloc ' + str(array.index) + '\n' + $pos.expr_out + $new_value.expr_out + 'stelem.'
+    $stack_out += $pos.stack_out + 1
+    $body += 'ldloc ' + str(array.index) + '\n' + $pos.expr_out
+}
+    (LCOR another_pos=expr[$ts] RCOR
+{
+if array:
+    $stack_out += $another_pos.stack_out
+    $body += $another_pos.expr_out + 'mul\n'
+}
+    )* ASSIGN new_value=expr[$ts] SEMICOLON
+{
+if array:
+    $body += $new_value.expr_out + 'stelem.'
 
-    if $new_value.type_out == 'int':
+    if $new_value.type_out == 'int' or $new_value.type_out == 'bool':
         $body += 'i4\n'
     elif $new_value.type_out == 'float':
         $body += 'r4\n'
-
 }
     | FOR from_forexpr=forexpr[$ts]
 {
@@ -245,7 +265,7 @@ dims returns [String body]
 @init{
 $body = ""
 }
-    : INTEGER (COMMA)* 
+    : INTEGER 
 {
 $body += $INTEGER.text
 }
@@ -513,10 +533,10 @@ $stack_out = 1
 $expr_out = 'ldstr ' + $STRING.text + '\n'
 $type_out = 'string'
 }
-    | FLOAT
+    | REAL
 {
 $stack_out = 1
-$expr_out = 'ldc.r4 ' + $FLOAT.text + '\n'
+$expr_out = 'ldc.r4 ' + $REAL.text + '\n'
 $type_out = 'float'
 }
     | BOOLEANO
@@ -550,15 +570,32 @@ array = $ts.get($IDENTIFIER.text)
 if array:
     $expr_out += 'ldloc ' + str(array.index) + '\n' + $from_expr.expr_out
     $stack_out += $from_expr.stack_out + 1
-
-    if array.stype == 'int[]':
+}
+    (LCOR from_another_expr=expr[ts] RCOR
+{
+if array:
+    $expr_out += $from_another_expr.expr_out + 'mul\n'
+    $stack_out += $from_another_expr.stack_out
+}
+    )*
+{
+array = $ts.get($IDENTIFIER.text)
+if array:
+    array_type = array.stype.split('[')[0]
+    if array_type == 'int':
         $expr_out += 'ldelem.i4' + '\n'
         $stack_out +=  1
         $type_out = 'int'
-    elif array.stype == 'float[]':
+
+    elif array_type == 'float':
         $expr_out += 'ldelem.r4' + '\n'
         $stack_out +=  1
         $type_out = 'float'
+
+    elif array_type == 'bool':
+        $expr_out += 'ldelem.i4' + '\n'
+        $stack_out +=  1
+        $type_out = 'bool'
 }
     | POSTADDOP IDENTIFIER
 {
@@ -595,6 +632,7 @@ fragment ESCAPED_QUOTE : '\\"';
 /* ----- LEXICAL RULES ----- */
 VOID : 'void';
 INT : 'int';
+FLOAT : 'float';
 DEF : 'def';
 FOR : 'for';
 DO : 'do';
@@ -618,7 +656,7 @@ STRING :   '"' ( ESCAPED_QUOTE | ~('\n'|'\r') )*? '"';
 IDENTIFIER : LETTER (LETTER|'0'..'9')* ;
 LETTER : 'A'..'Z' | 'a'..'z' | '_' ;
 INTEGER : '0'..'9' DIGITS* ;
-FLOAT    :   ('0'..'9')+'.'('0'..'9')+;
+REAL    :   ('0'..'9')+'.'('0'..'9')+;
 DIGITS : ( '0' .. '9' )+ ;
 COLON: ':';
 ASSIGN : '=';
