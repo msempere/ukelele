@@ -11,4 +11,5 @@ def main() void{
     c[7] = 0.2;
     println(c[0]);
     println(c[7]);
+    return();
 }

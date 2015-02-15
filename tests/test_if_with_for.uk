@@ -9,5 +9,6 @@ def main() void{
         }
     else
         print(0);
+    return();
 }
 

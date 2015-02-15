@@ -3,5 +3,6 @@ def main() void{
         println(True); 
     else 
         println(False);
+    return();
 }
 

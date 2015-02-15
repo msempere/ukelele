@@ -1,0 +1,13 @@
+def main() void{
+    int a;
+    a = 5;
+    println(a);
+    do{
+        int a;
+        println(b);
+        a = a + 1;
+    }
+    while(a<10)
+    println(a);
+    return();
+}

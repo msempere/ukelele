@@ -1,0 +1,20 @@
+def main() void{
+    int a;
+    a = 5;
+    println(a);
+    do{
+        int b;
+        println(b);
+        a = a + 1;
+        for(int i=5; i>0; i=i-2)
+        {
+            int c;
+            print(c);
+            print(a);
+            println(b);
+        }
+    }
+    while(a<2)
+    println(a);
+    return();
+}

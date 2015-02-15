@@ -1,0 +1,4 @@
+def main() void{
+    int a;
+    return(3);
+}
