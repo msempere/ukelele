@@ -2,7 +2,7 @@ grammar ukelele;
 
 @header {
 from symbolsTable import SymbolsTable, Scope, Stype
-from utilities import error_message, error_message_without_line, already_defined_message, reserved_word_message
+from utilities import error_message, error_message_without_line, already_defined_message, reserved_word_message, not_defined_message
 }
 
 options {
@@ -11,7 +11,7 @@ options {
 
 @parser::members{
     self.types = {'int': 'int32', 'string': 'string', 'bool': 'bool', 'float': 'float32'}
-    self.RESERVED_WORDS = ['int', 'string', 'float', 'main', 'bool', 'Print', 'Println', 'auto', 'True', 'False']
+    self.RESERVED_WORDS = ['match', 'int', 'string', 'float', 'main', 'bool', 'Print', 'Println', 'auto', 'True', 'False']
     self.branches = 0
 }
 
@@ -35,24 +35,25 @@ $code = ""
 }
     : DEF IDENTIFIER {$code += ".method static "} params=parameters type_specifier {$code +=$type_specifier.text + ' '} 
 {
-if $IDENTIFIER.text == 'main':
-    $ts.add(name=$IDENTIFIER.text, stype=($type_specifier.text, Stype.METHOD), isFunction=True, scope=Scope.GLOBAL, line=$IDENTIFIER.line)
-    $code += "Main" + $params.text + " cil managed {\n.entrypoint\n"
+element = $ts.get($IDENTIFIER.text)
+
+if not element:
+    if $IDENTIFIER.text == 'main':
+        $ts.add(name=$IDENTIFIER.text, stype=$type_specifier.text, isFunction=True, scope=Scope.GLOBAL, line=$IDENTIFIER.line)
+        $code += "Main" + $params.text + " cil managed {\n.entrypoint\n"
+    else:
+        $ts.add(name=$IDENTIFIER.text, stype=$type_specifier.text, isFunction=True, scope=Scope.GLOBAL, line=$IDENTIFIER.line)
+        $code += $IDENTIFIER.text + $params.text + " cil managed {\n"
+    ts_son = SymbolsTable($ts)
 else:
-    $ts.add(name=$IDENTIFIER.text, stype=($type_specifier.text, Stype.METHOD), isFunction=True, scope=Scope.GLOBAL, line=$IDENTIFIER.line)
-    $code += $IDENTIFIER.text + $params.text + " cil managed {\n"
-ts_son = SymbolsTable($ts)
+    already_defined_message($IDENTIFIER.text, $IDENTIFIER.line, element.line)
 } 
 
     from_block=block[ts_son, $scope, $type_specifier.text]
 {
-# if there is no return and the type defined is void, should be OK
-#if (not $from_block.type_out) and ($type_specifier.text == 'void'):
-#    pass
-#else:
-#    # if types differ, throw error
-#    if $from_block.type_out != $type_specifier.text:
-#        error_message('"' + $IDENTIFIER.text + '" with type "' + $type_specifier.text + '" returning "' + $from_block.type_out + '"', $IDENTIFIER.line)
+if not $from_block.has_return:
+    error_message('Expected return statement for function "' + $IDENTIFIER.text + '"', $IDENTIFIER.line)
+
 
 $code += ".maxstack " + str($from_block.stack_out) + "\n" + '.locals init ('
 local_vars = []
@@ -79,7 +80,7 @@ $code += "}\n"
 /*block : LBRACKET declins RBRACKET*/
 /*declins : ( instr | decl )**/
 
-block[SymbolsTable ts, String scope, String expected_return] returns [Int stack_out, String body, List locals, String type_out]
+block[SymbolsTable ts, String scope, String expected_return] returns [Int stack_out, String body, List locals, String type_out, Bool has_return]
 @init
 {
 $body = ''
@@ -88,6 +89,7 @@ $locals = []
 }
     : LBRACKET from_declins=declins[ts, $scope, $expected_return]
 {
+$has_return = $from_declins.has_return
 $type_out = $from_declins.type_out
 $locals += $from_declins.locals
 $stack_out += $from_declins.stack_out
@@ -97,7 +99,7 @@ $body += $from_declins.body
     ;
 
 
-declins[SymbolsTable ts, String scope, String expected_return] returns [Int stack_out, String body, List locals, String type_out]
+declins[SymbolsTable ts, String scope, String expected_return] returns [Int stack_out, String body, List locals, String type_out, Bool has_return]
 @init
 {
 $stack_out = 0
@@ -106,6 +108,7 @@ $body = ''
 }
     : ( from_instr=instr[ts, $scope, $expected_return]
 {
+$has_return = $from_instr.has_return
 $type_out = $from_instr.type_out
 $locals += $from_instr.locals
 $stack_out += $from_instr.stack_out 
@@ -218,8 +221,37 @@ $body += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
 }
     ;
 
+matching[SymbolsTable ts, String scope, String expected_return, String index] returns [Int stack_out, String body, List locals, String type_out, Bool has_return]
+@init
+{
+$stack_out = 0
+$body = ""
+$locals = []
+final_body = ""
+}
+    :
+    (from_base=base[$ts, '', $scope] ARROW from_block=block[$ts, $scope, $expected_return]
+{
+self.branches += 1
+$body += $index
+$body += $from_base.expr_out
+$stack_out += $from_base.stack_out + $from_block.stack_out + 1
+$body += 'beq L' + str(self.branches) + '\n'
+final_body += 'L' + str(self.branches) + ':\n' + $from_block.body + 'br L{final_branch}\n'
+$locals += $from_block.locals
+}
+    )* ANONYMOUS ARROW from_anon_block=block[$ts, $scope, $expected_return]
+{
+self.branches += 1
+$body += 'br L' + str(self.branches) + '\n'
+$body += final_body.format(final_branch=str(self.branches)) + 'L' + str(self.branches) + ':\n' + $from_anon_block.body
+$stack_out += $from_anon_block.stack_out
+$locals += $from_anon_block.locals
+}
+    ;
 
-instr[SymbolsTable ts, String scope, String expected_return] returns [Int stack_out, String body, List locals, String type_out]
+
+instr[SymbolsTable ts, String scope, String expected_return] returns [Int stack_out, String body, List locals, String type_out, Bool has_return]
 @init
 {
 ts_son = None
@@ -233,6 +265,55 @@ initialize = False
 $stack_out += $operation.stack_out
 $body += $operation.operation
 }
+    | MATCH IDENTIFIER LBRACKET
+{
+element = $ts.get($IDENTIFIER.text)
+
+if element:
+    #$body += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+    index = 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+    #$stack_out += 1
+else:
+    error_message('"' + $IDENTIFIER.text + '" not defined', $IDENTIFIER.line)
+}
+    from_matching=matching[$ts, $scope, $expected_return, index] RBRACKET 
+{
+$stack_out += $from_matching.stack_out
+$body += $from_matching.body
+$locals += $from_matching.locals
+}
+    | IDENTIFIER LPAREN RPAREN SEMICOLON
+{ # function definition TODO
+element = $ts.get($IDENTIFIER.text)
+if element:
+    $body += 'call ' + element.stype + ' ' + $IDENTIFIER.text + '()\n'
+}
+    | POSTADDOP IDENTIFIER SEMICOLON
+{ 
+$body += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+
+if $ts.get($IDENTIFIER.text).stype  == 'int':
+    $body += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
+elif $ts.get($IDENTIFIER.text).stype  == 'float':
+    $body += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
+
+$body += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
+$stack_out += 2
+$type_out = 'int'
+}
+    | IDENTIFIER POSTADDOP SEMICOLON
+{
+$body += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+
+if $ts.get($IDENTIFIER.text).stype  == 'int':
+    $body += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
+elif $ts.get($IDENTIFIER.text).stype  == 'float':
+    $body += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
+
+$body += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
+$stack_out += 2
+$type_out = 'int'
+}   
     | from_block=block[$ts, $scope, $expected_return]
 {
 $type_out = $from_block.type_out
@@ -306,7 +387,7 @@ if array:
 $type_out = $from_forexpr.type_out
 $stack_out += $from_forexpr.stack_out 
 $body += $from_forexpr.body
-$locals = $from_forexpr.locals
+$locals += $from_forexpr.locals
 }
     | DO {ts_son = SymbolsTable($ts)} from_block=block[ts_son, Scope.LOOP, $expected_return] WHILE LPAREN comparison=expr[$ts, $scope] RPAREN
 {
@@ -339,6 +420,7 @@ void_expr = False
 }
     )? RPAREN SEMICOLON
 {
+$has_return = True
 $type_out = '' if not $type_out else $type_out
 
 if void_expr:
@@ -715,18 +797,22 @@ if array:
         $type_out = 'string'
 }
     | POSTADDOP IDENTIFIER
-{
-$expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+{ 
+element = $ts.get($IDENTIFIER.text)
+if element:
+    $expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
 
-if $ts.get($IDENTIFIER.text).stype  == 'int':
-    $expr_out += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
-elif $ts.get($IDENTIFIER.text).stype  == 'float':
-    $expr_out += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
+    if $ts.get($IDENTIFIER.text).stype  == 'int':
+        $expr_out += 'ldc.i4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.i4 1\nsub\n'
+    elif $ts.get($IDENTIFIER.text).stype  == 'float':
+        $expr_out += 'ldc.r4 1\nadd\n' if $POSTADDOP.text == '++' else 'ldc.r4 1\nsub\n'
 
-$expr_out += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
-$expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
-$stack_out += 3
-$type_out = 'int'
+    $expr_out += 'stloc.' + str($ts.get($IDENTIFIER.text).index) + '\n'
+    $expr_out += 'ldloc ' + str($ts.get($IDENTIFIER.text).index) + '\n'
+    $stack_out += 3
+    $type_out = 'int'
+else:
+    not_defined_message($IDENTIFIER.text, $IDENTIFIER.line)
 }
     | IDENTIFIER POSTADDOP
 {
@@ -753,9 +839,11 @@ STRING : 'string';
 FLOAT : 'float';
 DEF : 'def';
 FOR : 'for';
+MATCH : 'match';
 DO : 'do';
 WHILE : 'while';
 IF : 'if';
+ANONYMOUS : '_';
 ELSE : 'else';
 RETURN : 'return';
 PRINT : 'print';
@@ -785,6 +873,7 @@ LCOR : '[';
 RCOR : ']';
 LBRACKET    : '{';
 RBRACKET    : '}';
+ARROW       : '->';
 COMMA: ',';
 
 BlockComment
