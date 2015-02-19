@@ -8,6 +8,10 @@ def already_defined_message(who, new_line, old_line):
     msg = '"{element}" already defined in line {ol}'.format(element=who, ol=old_line)
     error_message(msg, new_line)
 
+def not_defined_message(who, line):
+    msg='"{element}" not defined'.format(element=who)
+    error_message(msg, line)
+
 def reserved_word_message(word, line):
     msg = 'Illegal use of reserved word "{element}"'.format(element=word)
     error_message(msg, line)
