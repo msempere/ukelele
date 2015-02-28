@@ -23,8 +23,11 @@ $code = ".assembly __ukelele__cil__file__ {}\n.assembly extern mscorlib {}\n\n"
 }
     : (from_funcdef=funcdef[$ts, Scope.BLOCK_LOCAL] {$code += $from_funcdef.code} )*
 {
-if not $ts.get('main'):
+element = $ts.get('main')
+if not element:
     error_message_without_line('"main" not defined')
+elif element.stype != 'void':
+    error_message_without_line('"main" function should return void')
 }
     ;
 
