@@ -7,7 +7,7 @@ OUTPUTS := $(patsubst %.uk,%.exe,$(SOURCES))
 all: $(OUTPUTS)
 
 %.ukil: %.uk
-	./ukelele $<
+	./bin/ukelele $<
 
 %.exe: %.ukil
 	$(ILASM) /exe /output:$@ $<
