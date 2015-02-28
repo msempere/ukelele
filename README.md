@@ -13,15 +13,17 @@ $> make
 ```
 It will compile all .uk files in the current directory, generating .exe
 
+Or if you hate make files:
+```
+$> ./bin/ukelele test.uk
+```
+
+
 ### Execution:
 ```
 $> mono test.exe 
 ```
 
-Or if you hate make files:
-```
-$> ./bin/ukelele test.uk
-```
 
 ## Examples:
 
@@ -96,6 +98,7 @@ def main() void{
 }
 ```
 More examples in test folder
+
 
 ## Requeriments
 - ilasm
